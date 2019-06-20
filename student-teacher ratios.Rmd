@@ -1,0 +1,243 @@
+---
+title: "student-teacher-ratios"
+author: "DeFrayne"
+date: "June 13, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(here)
+library(WDI)
+theme_set(theme_light())
+#Import the student to teacher ratio data
+student_ratio <- readr::read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2019/2019-05-07/student_teacher_ratio.csv")
+
+```
+
+```{r}
+#Exploring the dataset
+View(student_ratio)
+
+colnames(student_ratio)
+
+student_ratio %>% count(flags, sort=T)
+
+student_ratio %>% count(year, sort=T)
+
+student_ratio %>% count(indicator, sort=T)
+
+student_ratio_2015 <- student_ratio %>%
+  filter(indicator == "Primary Education", year==2015, !is.na(student_ratio))
+
+student_ratio_2015 %>%
+  arrange(desc(student_ratio)) %>%
+  slice(c(1:10, seq(n() - 10, n()))) %>%
+  mutate(country=fct_reorder(country, student_ratio)) %>%
+  ggplot(aes(country,student_ratio)) +
+  geom_col() +
+  coord_flip() +
+  labs(title="Student to Teacher Ratio: Top 10 and Bottom 10 Countries",
+       y="Student to Teacher Ratio",
+       x="")
+
+student_ratio_2015 %>%
+  ggplot(aes(student_ratio)) +
+  geom_histogram() +
+  scale_x_log10()
+```
+There is an apparent negative correlation between national wealth and student/teacher ratio. There are some clear exceptions, such as Cuba having a low student/teacher ratio and the United States not being in the top 10.
+
+```{r}
+WDIsearch("gdp per capita") %>% View()
+
+WDIsearch("literacy") %>% View()
+
+WDIsearch("public.*education") %>% View()
+
+WDIsearch("population") %>%
+  as.data.frame() %>%
+  tbl_df() %>%
+  filter(str_detect(name,"^Population"))
+
+indicators_raw <- WDI(indicator=c("NY.GDP.PCAP.CD",
+                                  "SP.POP.TOTL",
+                                  "SE.ADT.LITR.ZS",
+                                  "SE.XPD.TOTL.GD.ZS",
+                                  "SE.SEC.NENR.MA",
+                                  "SE.SEC.NENR.FE"
+                                  ),
+                      start=2015,end=2015, extra=T) %>%
+  tbl_df()
+
+indicators <- indicators_raw %>%
+  select(country_code=iso3c,
+         region,
+         NY.GDP.PCAP.CD:SE.SEC.NENR.FE) %>%
+  mutate(country_code = as.character(country_code))
+
+
+student_ratio_2015 %>%
+  inner_join(indicators, by="country_code") %>%
+  arrange(desc(SP.POP.TOTL)) %>%
+  ggplot(aes(NY.GDP.PCAP.CD, student_ratio)) +
+  geom_point(aes(size=SP.POP.TOTL, color=region)) +
+  scale_x_log10() +
+  scale_y_log10() + 
+  scale_size_continuous(labels=scales::comma_format(), range=c(0.25,12)) +
+  geom_text(aes(label=country), vjust=1, hjust=1, check_overlap=T) +
+  labs(x="GDP per Capita",
+       y="Student to Teacher Ratio in Primary Education",
+       color="Region",
+       title="Visualized negative correlation between GDP per capita and student/teacher ratio",
+       size="Population")
+```
+This confirms that there exists a negative correlation between national wealth and student/teacher ratio.
+
+```{r}
+WDIsearch("education") %>%
+  as.data.frame() %>%
+  tbl_df() %>%
+  filter(str_detect(name,"population"))
+
+```
+#Primary vs. Secondary Education
+```{r}
+secondary_primary_education <- student_ratio %>%
+  filter(year==2015,
+         !is.na(student_ratio),
+         indicator %in% c("Primary Education", "Secondary Education")) %>%
+  group_by(country) %>%
+  filter(n()==2) %>%
+  ungroup()
+
+secondary_primary_education %>%
+  inner_join(indicators, by="country_code") %>%
+  arrange(desc(SP.POP.TOTL)) %>%
+  ggplot(aes(NY.GDP.PCAP.CD, student_ratio)) +
+  geom_point(aes(size=SP.POP.TOTL, color=region)) +
+  geom_text(aes(label=country), vjust=1, hjust=1, check_overlap=TRUE) +
+  scale_x_log10() +
+  scale_y_log10() +
+  scale_size_continuous(labels = scales::comma_format(), range=c(0.25,12)) +
+  facet_wrap(~ indicator) +
+  labs(x = "GDP per Capita",
+       y = "Student to Teacher Ratio in Primary Education",
+       subtitle = "In 2015",
+       title = "GDP per Capita and Student/Teacher Ratio are Negatively Correlated",
+       color = "Region",
+       size = "Population")
+```
+#Other Indicators
+```{r}
+student_ratio_2015 %>%
+  inner_join(indicators, by="country_code") %>%
+  filter(!is.na(SE.ADT.LITR.ZS)) %>%
+  mutate(literacy=SE.ADT.LITR.ZS/100) %>%
+  ggplot(aes(NY.GDP.PCAP.CD,literacy)) +
+  geom_point() +
+  geom_text(aes(label=country), vjust=1, hjust=1, check_overlap=TRUE) +
+  scale_x_log10() + 
+  scale_y_continuous(labels=scales::percent_format())
+
+student_ratio_2015 %>%
+  inner_join(indicators, by="country_code") %>%
+  filter(!is.na(SE.ADT.LITR.ZS)) %>%
+  mutate(literacy=SE.ADT.LITR.ZS/100) %>%
+  ggplot(aes(student_ratio,literacy)) +
+  geom_point() +
+  geom_text(aes(label=country), vjust=1, hjust=1, check_overlap=TRUE) +
+  scale_x_log10() + 
+  scale_y_continuous(labels=scales::percent_format())
+```
+
+#Exploring secondary education enrollment rates
+```{r}
+joined <- student_ratio_2015 %>%
+  inner_join(indicators, by="country_code") %>%
+  mutate(secondary_enrollment = (SE.SEC.NENR.FE+SE.SEC.NENR.MA)/2)
+
+joined %>%
+  ggplot(aes(SE.SEC.NENR.FE)) +
+  geom_histogram()
+
+joined %>%
+  ggplot(aes(SE.SEC.NENR.MA)) +
+  geom_histogram()
+
+joined %>%
+  ggplot(aes(SE.SEC.NENR.MA,SE.SEC.NENR.FE)) +
+  geom_point()
+
+joined %>%
+  arrange(desc(SP.POP.TOTL)) %>%
+  ggplot(aes(NY.GDP.PCAP.CD,secondary_enrollment)) +
+  geom_point() +
+  scale_x_log10() + 
+  geom_text(aes(label=country), vjust=1, hjust=1, check_overlap=TRUE) +
+  labs(x = "GDP per Capita",
+       y = "Secondary School Enrollment")
+```
+
+```{r}
+joined %>%
+  arrange(desc(SP.POP.TOTL)) %>%
+  ggplot(aes(student_ratio,secondary_enrollment)) +
+  geom_point() +
+  geom_text(aes(label=country), vjust=1, hjust=1, check_overlap=TRUE) +
+  labs(x = "Student to Teacher Ratio",
+       y = "Secondary School Enrollment")
+```
+
+#Examining the confounding variable
+```{r}
+lm(secondary_enrollment ~ student_ratio, joined) %>%
+  summary()
+
+lm(secondary_enrollment ~ student_ratio + log(NY.GDP.PCAP.CD), joined) %>%
+  summary()
+
+lm(secondary_enrollment ~ student_ratio + log2(NY.GDP.PCAP.CD), joined) %>%
+  summary()
+
+
+lm(secondary_enrollment ~ student_ratio + log10(NY.GDP.PCAP.CD), joined) %>%
+  summary()
+
+lm(secondary_enrollment ~ student_ratio + log2(NY.GDP.PCAP.CD) + region, joined) %>%
+  aov() %>%
+  summary()
+
+joined %>%
+  filter(!is.na(SE.XPD.TOTL.GD.ZS)) %>%
+  lm(secondary_enrollment ~ student_ratio + log2(NY.GDP.PCAP.CD) + SE.XPD.TOTL.GD.ZS,
+     data = .) %>%
+  summary()
+
+ggplot(joined, aes(SE.XPD.TOTL.GD.ZS, secondary_enrollment)) +
+  geom_point()
+
+joined %>%
+    transmute(student_ratio,
+              secondary_enrollment,
+              log2_gdp = log2(NY.GDP.PCAP.CD)) %>%
+  cor(use="pairwise.complete.obs")
+```
+
+#Appendix: Primary vs. Secondary Education
+```{r}
+secondary_primary_education %>%
+  select(indicator,country,student_ratio) %>%
+  mutate(indicator=snakecase::to_snake_case(indicator)) %>%
+  spread(indicator,student_ratio) %>%
+  mutate(ratio=secondary_education/primary_education) %>%
+  ggplot(aes(primary_education, secondary_education)) +
+  geom_point() +
+  scale_x_log10() +
+  scale_y_log10() + 
+  geom_text(aes(label=country), vjust=1, hjust=1, check_overlap=TRUE)
+```
